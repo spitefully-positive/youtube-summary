@@ -1,40 +1,16 @@
 use std::env;
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum Model {
-    Haiku,
-    #[default]
-    Sonnet,
-    Opus,
-}
-
-impl Model {
-    pub fn api_name(&self) -> &'static str {
-        match self {
-            Model::Haiku => "claude-3-5-haiku-20241022",
-            Model::Sonnet => "claude-sonnet-4-20250514",
-            Model::Opus => "claude-opus-4-20250514",
-        }
-    }
-
-    fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "haiku" => Some(Model::Haiku),
-            "sonnet" => Some(Model::Sonnet),
-            "opus" => Some(Model::Opus),
-            _ => None,
-        }
-    }
-}
+use crate::openrouter::DEFAULT_MODEL;
 
 #[derive(Debug)]
 pub struct Args {
-    pub url: String,
+    pub url: Option<String>,
     pub prompt: Option<String>,
-    pub model: Option<Model>,
+    pub model: Option<String>,
     pub api_key: Option<String>,
     pub config_path: Option<String>,
     pub verbose: bool,
+    pub list_models: Option<Option<String>>,
 }
 
 impl Args {
@@ -56,6 +32,7 @@ impl Args {
         let mut api_key = None;
         let mut config_path = None;
         let mut verbose = false;
+        let mut list_models: Option<Option<String>> = None;
 
         let mut i = 1;
         while i < args.len() {
@@ -72,11 +49,9 @@ impl Args {
                 "-m" | "--model" => {
                     i += 1;
                     if i >= args.len() {
-                        return Err("--model requires a value (haiku, sonnet, opus)".to_string());
+                        return Err("--model requires a value".to_string());
                     }
-                    model = Some(Model::from_str(&args[i]).ok_or_else(|| {
-                        format!("Invalid model: {}. Use haiku, sonnet, or opus", args[i])
-                    })?);
+                    model = Some(args[i].clone());
                 }
                 "-k" | "--api-key" => {
                     i += 1;
@@ -95,6 +70,15 @@ impl Args {
                 "-v" | "--verbose" => {
                     verbose = true;
                 }
+                "-l" | "--list-models" => {
+                    // Check if next arg is a search term (not starting with -)
+                    if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                        i += 1;
+                        list_models = Some(Some(args[i].clone()));
+                    } else {
+                        list_models = Some(None);
+                    }
+                }
                 _ if !arg.starts_with('-') && url.is_none() => {
                     url = Some(arg.clone());
                 }
@@ -105,7 +89,10 @@ impl Args {
             i += 1;
         }
 
-        let url = url.ok_or_else(|| "YouTube URL is required".to_string())?;
+        // URL is required unless --list-models is specified
+        if list_models.is_none() && url.is_none() {
+            return Err("YouTube URL is required".to_string());
+        }
 
         Ok(Args {
             url,
@@ -114,27 +101,36 @@ impl Args {
             api_key,
             config_path,
             verbose,
+            list_models,
         })
     }
 
     fn usage() -> String {
-        r#"Usage: youtube-summary <URL> [OPTIONS]
+        format!(
+            r#"Usage: youtube-summary [OPTIONS] [URL]
 
 Arguments:
-  <URL>                    YouTube video URL
+  [URL]                     YouTube video URL (required unless --list-models)
 
 Options:
-  -p, --prompt <PROMPT>    Custom prompt for the summary
-  -m, --model <MODEL>      Model to use: haiku, sonnet, opus (default: sonnet)
-  -k, --api-key <KEY>      Anthropic API key (overrides env/config)
-  -c, --config <PATH>      Path to config file
-  -v, --verbose            Show verbose output
-  -h, --help               Show this help message
+  -p, --prompt <PROMPT>     Custom prompt for the summary
+  -m, --model <MODEL>       OpenRouter model ID (default: {})
+  -k, --api-key <KEY>       OpenRouter API key (overrides env/config)
+  -c, --config <PATH>       Path to config file
+  -l, --list-models [TERM]  List available models (optionally filter by TERM)
+  -v, --verbose             Show verbose output
+  -h, --help                Show this help message
+
+Environment:
+  OPENROUTER_API_KEY        API key for OpenRouter
 
 Examples:
   youtube-summary "https://youtube.com/watch?v=VIDEO_ID"
-  youtube-summary "https://youtube.com/watch?v=VIDEO_ID" -p "Is this worth watching?"
-  youtube-summary "https://youtube.com/watch?v=VIDEO_ID" -m opus -v"#
-            .to_string()
+  youtube-summary "https://youtube.com/watch?v=VIDEO_ID" -m anthropic/claude-sonnet-4
+  youtube-summary --list-models                    # List all models
+  youtube-summary --list-models claude             # List models matching "claude"
+  youtube-summary -l gpt -v                        # List GPT models with verbose output"#,
+            DEFAULT_MODEL
+        )
     }
 }

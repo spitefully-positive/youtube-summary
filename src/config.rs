@@ -1,5 +1,6 @@
-use crate::cli::{Args, Model};
+use crate::cli::Args;
 use crate::error::{Error, Result};
+use crate::openrouter::DEFAULT_MODEL;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -7,7 +8,7 @@ use std::path::PathBuf;
 #[derive(Debug)]
 pub struct Config {
     pub api_key: String,
-    pub model: Model,
+    pub model: String,
     pub prompt: String,
     pub verbose: bool,
 }
@@ -17,25 +18,29 @@ impl Config {
         // Load config file if it exists
         let file_config = Self::load_config_file(args.config_path.as_deref())?;
 
-        // Load credentials from ~/.config/youtube-summary/credentials.toml
+        // Load credentials from ~/.config/youtube-summary/credentials
         let credentials = Credentials::load()?;
 
-        // API key precedence: CLI > env > credentials.toml > config file
+        // API key precedence: CLI > env > credentials > config file
         let api_key = args
             .api_key
             .clone()
-            .or_else(|| env::var("ANTHROPIC_API_KEY").ok())
-            .or(credentials.anthropic_api_key)
+            .or_else(|| env::var("OPENROUTER_API_KEY").ok())
+            .or(credentials.openrouter_api_key)
             .or(file_config.api_key)
             .ok_or_else(|| {
                 Error::Config(
-                    "No API key found. Set ANTHROPIC_API_KEY env var, use --api-key, or add to ~/.config/youtube-summary/credentials.toml"
+                    "No API key found. Set OPENROUTER_API_KEY env var, use --api-key, or add to ~/.config/youtube-summary/credentials"
                         .to_string(),
                 )
             })?;
 
         // Model precedence: CLI > config file > default
-        let model = args.model.or(file_config.model).unwrap_or_default();
+        let model = args
+            .model
+            .clone()
+            .or(file_config.model)
+            .unwrap_or_else(|| DEFAULT_MODEL.to_string());
 
         // Prompt: CLI > default
         let prompt = args.prompt.clone().unwrap_or_else(|| {
@@ -88,14 +93,7 @@ impl Config {
 
                 match key {
                     "api_key" => config.api_key = Some(value.to_string()),
-                    "default_model" => {
-                        config.model = match value.to_lowercase().as_str() {
-                            "haiku" => Some(Model::Haiku),
-                            "sonnet" => Some(Model::Sonnet),
-                            "opus" => Some(Model::Opus),
-                            _ => None,
-                        };
-                    }
+                    "default_model" => config.model = Some(value.to_string()),
                     _ => {} // Ignore unknown keys
                 }
             }
@@ -108,12 +106,12 @@ impl Config {
 #[derive(Debug, Default)]
 struct FileConfig {
     api_key: Option<String>,
-    model: Option<Model>,
+    model: Option<String>,
 }
 
 #[derive(Debug, Default)]
 struct Credentials {
-    anthropic_api_key: Option<String>,
+    openrouter_api_key: Option<String>,
 }
 
 impl Credentials {
@@ -142,8 +140,8 @@ impl Credentials {
                 let key = key.trim();
                 let value = value.trim().trim_matches('"').trim_matches('\'');
 
-                if key == "ANTHROPIC_API_KEY" {
-                    credentials.anthropic_api_key = Some(value.to_string());
+                if key == "OPENROUTER_API_KEY" {
+                    credentials.openrouter_api_key = Some(value.to_string());
                 }
             }
         }
